@@ -231,7 +231,9 @@ class Robot():
         
         '''
         order of substitution: d, alpha, a, acc, vel, theta
-        values of higher order derivatives are substituted first and then the values of the lower ones, this is done to make sure that the lower order derivative values are not overwritten by the higher order ones. to better understand this phenemenon, run this block of code:
+        values of higher order derivatives are substituted first and then the values of the lower ones,
+        this is done to make sure that the lower order derivative values are not overwritten by the higher order ones
+        to better understand this phenemenon, run this block of code:
 
         t = sp.symbols('t', real=True)
         theta_expr = sp.Function('theta')(t)
