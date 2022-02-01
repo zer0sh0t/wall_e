@@ -23,8 +23,8 @@ class Robot():
         self.type = type_
         self.dh_params = dh_params
         self.masses = masses
-        self.dimensions = dimensions
         self.lengths = lengths
+        self.dimensions = dimensions
         self.t = sp.symbols('t', real=True)
         self.clear_cache()
 
@@ -189,9 +189,9 @@ class Robot():
         source: https://www.youtube.com/playlist?list=PLbRMhDVUMngcdUbBySzyzcPiFTYWr4rV_ lecture 24 to 29
 
         format of inputs:
-        thetas = [theta_0, theta_1, ..., theta_n]
-        vels = [vel_0, vel_1, ..., vel_n]
-        accs = [acc_0, acc_1, ..., acc_n]
+        thetas[list]: [theta_0, theta_1, ..., theta_n]
+        vels[list]: [vel_0, vel_1, ..., vel_n]
+        accs[list]: [acc_0, acc_1, ..., acc_n]
         lengths[list]: [length_0, length_1, ..., length_n]
 
         formulation of inverse dynamics:
