@@ -13,7 +13,7 @@ class Robot():
         type_(str): l - linear, r - rotary
         dh_params(list[list]): [[theta_0, d_0, alpha_0, a_0], [theta_1, d_1, alpha_1, a_1], ...]
         masses(list): [mass_0, mass_1, ..., mass_n]
-        lengths[list]: [length_0, length_1, ..., length_n]
+        lengths(list): [length_0, length_1, ..., length_n]
         dimensions(list[list]): [[radius_0], [radius_1], ..., [radius_n]] for joints of circular cross-sections
                               : [[a_0, b_0], [a_1, b_1], ..., [a_n, b_n]] for joints of rectangular cross-sections
                                 where a is the length and b is the breadth of the rectangular cross-section
@@ -189,10 +189,10 @@ class Robot():
         source: https://www.youtube.com/playlist?list=PLbRMhDVUMngcdUbBySzyzcPiFTYWr4rV_ lecture 24 to 29
 
         format of inputs:
-        thetas[list]: [theta_0, theta_1, ..., theta_n]
-        vels[list]: [vel_0, vel_1, ..., vel_n]
-        accs[list]: [acc_0, acc_1, ..., acc_n]
-        lengths[list]: [length_0, length_1, ..., length_n]
+        thetas(list): [theta_0, theta_1, ..., theta_n]
+        vels(list): [vel_0, vel_1, ..., vel_n]
+        accs(list): [acc_0, acc_1, ..., acc_n]
+        lengths(list): [length_0, length_1, ..., length_n]
 
         formulation of inverse dynamics:
         n: number of joints
