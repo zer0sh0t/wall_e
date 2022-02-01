@@ -101,7 +101,7 @@ class Robot():
 
     def _U_ijk(self, i, j, k):
         U_ij = self._U_ij(i, j)
-        U_ijk = U_ij.diff(self.forward_params[j][0])
+        U_ijk = U_ij.diff(self.forward_params[k][0]) # fkn idiot
         return U_ijk
 
     def _D_ic(self, i, c, n, Js):
@@ -189,7 +189,7 @@ class Robot():
                 ]
         U_ij = d_i0_T / dq_j
         U_ijk = dU_ij / dq_k
-        i0_v = sum_j_1_i(U_ij * q_j_dot) * ii_r # don't need to compute this
+        i0_v = sum_j_1_i(U_ij * q_j_dot) * ii_r # no need to compute this
 
         tau = sum_c_1_n(D_ic * q_c_ddot) + sum_c_1_n(sum_d_1_n(h_icd * q_c_dot * q_d_dot)) + C_i; i = 1 to n
 
@@ -218,9 +218,10 @@ class Robot():
         tau_exprs = []
         n = len(dh_params)
         for i in range(n):
+            inertial_force = 0
+            coriolis_force = 0
             for c in range(n):
-                inertial_force = self._inertial_force(i, c, n, Js)
-                coriolis_force = 0
+                inertial_force += self._inertial_force(i, c, n, Js)
                 for d in range(n):
                     coriolis_force += self._coriolis_force(i, c, d, n, Js)
 
@@ -312,9 +313,9 @@ if __name__ == '__main__':
         ]
     end_pos = [20, 20, 0] # qx, qy, qz
     vels = [10, 5]
-    accs = [0, 0]
-    masses = [5, 6]
-    lengths = [10, 5]
+    accs = [20, 10]
+    masses = [5, 7]
+    lengths = [20, 10]
     radii = [10, 10]
     taus_req = [50000, 700]
 
@@ -338,6 +339,7 @@ if __name__ == '__main__':
         sp.pprint(tau_expr)
         print(f'tau: {tau}', end='\n'*2)
 
+    exit()
     # forward dynamics
     optim_values, taus = robot.solve_fd(masses, lengths, radii, taus_req)
     print(optim_values)
