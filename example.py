@@ -9,10 +9,11 @@ end_pos = [20, 20, 0] # qx, qy, qz
 vels = [10, 5]
 accs = [0, 0]
 masses = [5, 7]
+lengths = [20, 10]
 dimensions = [[10], [10]] # [[r1], [r2]]
 taus_req = [2207, 343]
 
-bender = wall_e.Robot('bender', 'rr', dh_params) # 'rr' - 2 rotary joints
+bender = wall_e.Robot('bender', 'rr', dh_params, masses, lengths, dimensions) # 'rr' - 2 rotary joints
 print(bender)
 
 # forward kinematics
@@ -26,7 +27,7 @@ print(thetas, end='\n'*2)
 wall_e.pprint(fk_mat)
 
 # inverse dynamics
-tau_exprs, taus = bender.solve_id(thetas, vels, accs, masses, dimensions)
+tau_exprs, taus = bender.solve_id(thetas, vels, accs)
 for tau_expr, tau in zip(tau_exprs, taus):
     print('tau_expr:')
     wall_e.pprint(tau_expr)
@@ -42,6 +43,6 @@ class Bender(Robot):
     def solve_id():
         # write the inverse dynamics logic here in numpy
 '''
-optim_vals, taus = bender.solve_fd(masses, dimensions, taus_req)
+optim_vals, taus = bender.solve_fd(taus_req)
 print(optim_vals)
 print(taus)

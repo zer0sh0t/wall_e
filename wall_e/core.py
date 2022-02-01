@@ -7,15 +7,24 @@ from scipy.optimize import minimize
 pprint = lambda inp: sp.pprint(inp)
 
 class Robot():
-    def __init__(self, name, type_, dh_params):
+    def __init__(self, name, type_, dh_params, masses, lengths, dimensions):
         '''
         format of inputs:
         type_(str): l - linear, r - rotary
-        dh_params(list): theta, d, alpha, a
+        dh_params(list[list]): [[theta_0, d_0, alpha_0, a_0], [theta_1, d_1, alpha_1, a_1], ...]
+        masses(list): [mass_0, mass_1, ..., mass_n]
+        lengths[list]: [length_0, length_1, ..., length_n]
+        dimensions(list[list]): [[radius_0], [radius_1], ..., [radius_n]] for joints of circular cross-sections
+                              : [[a_0, b_0], [a_1, b_1], ..., [a_n, b_n]] for joints of rectangular cross-sections
+                                where a is the length and b is the breadth of the rectangular cross-section
+                              : [[radius_0], [a_1, b_1], [radius_2], ...] of course, it can be a combo of both
         '''
         self.name = name
         self.type = type_
         self.dh_params = dh_params
+        self.masses = masses
+        self.dimensions = dimensions
+        self.lengths = lengths
         self.t = sp.symbols('t', real=True)
         self.clear_cache()
 
@@ -175,7 +184,7 @@ class Robot():
         return gravitational_force
     
     # inverse dynamics
-    def solve_id(self, thetas, vels, accs, masses, dimensions, lengths=None):
+    def solve_id(self, thetas, vels, accs, lengths=None):
         '''
         source: https://www.youtube.com/playlist?list=PLbRMhDVUMngcdUbBySzyzcPiFTYWr4rV_ lecture 24 to 29
 
@@ -183,12 +192,7 @@ class Robot():
         thetas = [theta_0, theta_1, ..., theta_n]
         vels = [vel_0, vel_1, ..., vel_n]
         accs = [acc_0, acc_1, ..., acc_n]
-        masses = [mass_0, mass_1, ..., mass_n]
-        dimensions = [[radius_0], [radius_1], ..., [radius_n]] for joints of circular cross-sections
-                   = [[a_0, b_0], [a_1, b_1], ..., [a_n, b_n]] for joints of rectangular cross-sections
-                     where a is the length and b is the breadth of the rectangular cross-section
-                   = [[radius_0], [a_1, b_1], [radius_2], ...] of course, it can be a combo of both
-        lengths = [length_0, length_1, ..., length_n]
+        lengths[list]: [length_0, length_1, ..., length_n]
 
         formulation of inverse dynamics:
         n: number of joints
@@ -232,11 +236,11 @@ class Robot():
         
         dh_params = copy.deepcopy(self.dh_params)
         if lengths == None:
-            lengths = [dhp[3] for dhp in dh_params]
+            lengths = copy.deepcopy(self.lengths)
 
         if len(self.tau_exprs) == 0:
             Js = []
-            for m, l, d in zip(masses, lengths, dimensions):
+            for m, l, d in zip(self.masses, lengths, self.dimensions):
                 if len(d) == 1: # circular cross-section
                     r = d[0]
                     J = sp.Matrix([
@@ -270,7 +274,7 @@ class Robot():
                     for d in range(n):
                         coriolis_force += self._coriolis_force(i, c, d, n, Js)
 
-                gravitational_force = self._gravitational_force(i, n, masses, g, rs) # C_i
+                gravitational_force = self._gravitational_force(i, n, self.masses, g, rs) # C_i
                 tau_expr = inertial_force + coriolis_force + gravitational_force
                 self.tau_exprs.append(tau_expr)
         
@@ -325,7 +329,7 @@ class Robot():
             if 0 <= i < n:
                 if self.type[j] == 'r':
                     thetas.append(val) # this value will be optimized
-                    lengths.append(self.dh_params[j][3]) # whereas this value won't be optimized as this joint can't change it's length
+                    lengths.append(self.lengths[j]) # whereas this value won't be optimized as this joint can't change it's length
                 elif self.type[j] == 'l':
                     lengths.append(val) # this value will be optimized
                     thetas.append(self.dh_params[j][0]) # whereas this value won't be optimized as this joint can't change its angle
@@ -336,9 +340,9 @@ class Robot():
                 accs.append(val)
         return thetas, lengths, vels, accs
 
-    def _cost_fn_fd(self, initial_guess, masses, dimensions, taus_req):
+    def _cost_fn_fd(self, initial_guess, taus_req):
         thetas, lengths, vels, accs = self._get_vals(initial_guess)
-        taus = self.solve_id(thetas, vels, accs, masses, dimensions, lengths)[1]
+        taus = self.solve_id(thetas, vels, accs, lengths)[1]
         cost = 0
         for tr, t in zip(taus_req, taus):
             cost += (tr - t) ** 2
@@ -346,16 +350,16 @@ class Robot():
         return cost
 
     # forward dynamics
-    def solve_fd(self, masses, dimensions, taus_req, tol=None):
+    def solve_fd(self, taus_req, tol=None):
         initial_guess = [0 for _ in range(3*len(self.dh_params))]
-        cost_fn = partial(self._cost_fn_fd, masses=masses, dimensions=dimensions, taus_req=taus_req)
+        cost_fn = partial(self._cost_fn_fd, taus_req=taus_req)
         if tol == None:
             tol = 3e-4
 
         result = minimize(cost_fn, initial_guess, tol=tol)
         optim_vals = result.x
         thetas, lengths, vels, accs = self._get_vals(optim_vals)
-        taus = self.solve_id(thetas, vels, accs, masses, dimensions, lengths)[1]
+        taus = self.solve_id(thetas, vels, accs, lengths)[1]
         optim_vals = {'thetas': thetas, 'lengths': lengths, 'vels': vels, 'accs': accs}
         return optim_vals, taus
         
