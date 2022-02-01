@@ -1,4 +1,4 @@
-![wall_e](images/wall_e.jpg =500x500)
+<img src='images/wall_e.jpg' alt='image' width='500' height='500'/>
 
 `wall_e` is a library for solving forward kinematics, inverse kinematics, forward dynamics, inverse dynamics of robots. you only need to find the dh parameters of the robot and pass it to `wall_e` and it will take care of the rest. to install:
 
