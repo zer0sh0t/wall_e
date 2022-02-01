@@ -18,12 +18,18 @@ class Robot():
         self.t = sp.symbols('t', real=True)
 
     def _screw_zx(self, i):
-        theta = sp.Function(f'theta{i}')(self.t)
-        vel = theta.diff(self.t)
-        acc = vel.diff(self.t)
-        d, alpha, a = sp.symbols(f'd{i} alpha{i} a{i}', real=True)
-        ct, st, ca, sa = sp.cos(theta), sp.sin(theta), sp.cos(alpha), sp.sin(alpha)
+        if self.type[i] == 'r':
+            theta = sp.Function(f'theta{i}')(self.t)
+            vel = theta.diff(self.t)
+            acc = vel.diff(self.t)
+            d, alpha, a = sp.symbols(f'd{i} alpha{i} a{i}', real=True)
+        elif self.type[i] == 'l':
+            length = sp.Function(f'a{i}')(self.t)
+            vel = theta.diff(self.t)
+            acc = vel.diff(self.t)
+            theta, d, alpha = sp.symbols(f'theta{i} d{i} alpha{i}', real=True)
 
+        ct, st, ca, sa = sp.cos(theta), sp.sin(theta), sp.cos(alpha), sp.sin(alpha)
         screw_mat = sp.Matrix([
                                 [ct, -st*ca, sa*st, a*ct],
                                 [st, ca*ct, -sa*ct, a*st],
@@ -95,13 +101,22 @@ class Robot():
         fk_mat = self.solve_fk(dh_params)[1]
         return final_theta_vals, fk_mat
 
+    def _get_q_idx(self, i):
+        if self.type[i] == 'r':
+            q_idx = 0
+        elif self.type[i] == 'l':
+            q_idx = 3
+        return q_idx
+
     def _U_ij(self, i, j):
-        U_ij = self.forward_mats[i].diff(self.forward_params[j][0])
+        q_idx = self._get_q_idx(j)
+        U_ij = self.forward_mats[i].diff(self.forward_params[j][q_idx])
         return U_ij
 
     def _U_ijk(self, i, j, k):
         U_ij = self._U_ij(i, j)
-        U_ijk = U_ij.diff(self.forward_params[k][0])
+        q_idx = self._get_q_idx(k)
+        U_ijk = U_ij.diff(self.forward_params[k][q_idx])
         return U_ijk
 
     def _D_ic(self, i, c, n, Js):
@@ -146,7 +161,7 @@ class Robot():
             gravitational_force += val[0, 0]
         return gravitational_force
     
-    def solve_id(self, thetas, vels, accs, masses, lengths, radii):
+    def solve_id(self, thetas, vels, accs, masses, dimensions):
         '''
         source: https://www.youtube.com/playlist?list=PLbRMhDVUMngcdUbBySzyzcPiFTYWr4rV_ lecture 24 to 29
 
@@ -181,12 +196,8 @@ class Robot():
                 [0],
                 [0]
             ]
-        ii_r = [
-                    [-L_i/2],
-                    [0],
-                    [0],
-                    [1]
-                ]
+        ii_r = [-L_i/2, 0, 0, 1]
+        
         U_ij = d_i0_T / dq_j
         U_ijk = dU_ij / dq_k
         i0_v = sum_j_1_i(U_ij * q_j_dot) * ii_r # no need to compute this
@@ -200,18 +211,29 @@ class Robot():
 
         dh_params = copy.deepcopy(self.dh_params)
         Js = []
-        for m, l, r in zip(masses, lengths, radii):
-            J = sp.Matrix([
-                            [m*(l**2)/3, 0, 0, -m*l/2],
-                            [0, m*(r**2)/4, 0, 0],
-                            [0, 0, m*(r**2)/4, 0],
-                            [-m*l/2, 0, 0, m]
-                        ])
+        for m, d in zip(masses, dimensions):
+            if len(d) == 2: # circular cross-section
+                l, r = d
+                J = sp.Matrix([
+                                [m*(l**2)/3, 0, 0, -m*l/2],
+                                [0, m*(r**2)/4, 0, 0],
+                                [0, 0, m*(r**2)/4, 0],
+                                [-m*l/2, 0, 0, m]
+                            ])
+            elif len(d) == 3: # rectangular cross-section
+                l, a, b = d
+                J = sp.Matrix([
+                                [m*(a**2)/12, 0, 0, 0],
+                                [0, m*(l**2)/3, 0, -m*l/2],
+                                [0, 0, m*(b**2)/12, 0],
+                                [0, -m*(l**2)/2, 0, m]
+                            ])
             Js.append(J)
 
         g = sp.Matrix([0, -9.81, 0, 0]).T
         rs = []
-        for l in lengths:
+        for d in dimensions:
+            l = d[0]
             r = sp.Matrix([-l/2, 0, 0, 1])
             rs.append(r)
 
@@ -315,8 +337,7 @@ if __name__ == '__main__':
     vels = [10, 5]
     accs = [0, 0]
     masses = [5, 7]
-    lengths = [20, 10]
-    radii = [10, 10]
+    dimensions = [[20, 10], [10, 10]] # [[l1, r1], [l2, r2]]
     taus_req = [50000, 700]
 
     robot = Robot('hal', 'rr', dh_params)
@@ -333,13 +354,14 @@ if __name__ == '__main__':
     sp.pprint(fk_mat)
 
     # inverse dynamics
-    tau_exprs, taus = robot.solve_id(thetas, vels, accs, masses, lengths, radii)
+    tau_exprs, taus = robot.solve_id(thetas, vels, accs, masses, dimensions)
     for tau_expr, tau in zip(tau_exprs, taus):
         print('tau_expr:')
         sp.pprint(tau_expr)
         print(f'tau: {tau}', end='\n'*2)
 
     exit()
+    # will take care of forward dynamics soon
     # forward dynamics
     optim_values, taus = robot.solve_fd(masses, lengths, radii, taus_req)
     print(optim_values)
