@@ -101,7 +101,7 @@ class Robot():
 
     def _U_ijk(self, i, j, k):
         U_ij = self._U_ij(i, j)
-        U_ijk = U_ij.diff(self.forward_params[k][0]) # fkn idiot
+        U_ijk = U_ij.diff(self.forward_params[k][0])
         return U_ijk
 
     def _D_ic(self, i, c, n, Js):
@@ -313,7 +313,7 @@ if __name__ == '__main__':
         ]
     end_pos = [20, 20, 0] # qx, qy, qz
     vels = [10, 5]
-    accs = [20, 10]
+    accs = [0, 0]
     masses = [5, 7]
     lengths = [20, 10]
     radii = [10, 10]
