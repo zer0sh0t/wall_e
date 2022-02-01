@@ -5,12 +5,12 @@ dh_params = [
      [math.pi/2, 0, 0, 20], # theta, d, alpha, a
      [math.pi, 0, 0, 10],
     ]
-end_pos = [20, 20, 0] # qx, qy, qz
-vels = [10, 5]
-accs = [0, 0]
 masses = [5, 7]
 lengths = [20, 10]
 dimensions = [[10], [10]] # [[r1], [r2]]
+end_pos = [20, 20, 0] # qx, qy, qz
+vels = [10, 5]
+accs = [0, 0]
 taus_req = [2207, 343]
 
 bender = wall_e.Robot('bender', 'rr', dh_params, masses, lengths, dimensions) # 'rr' - 2 rotary joints
