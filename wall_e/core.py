@@ -1,21 +1,30 @@
-import copy
 import math
+import copy
 import sympy as sp
 from functools import partial
 from scipy.optimize import minimize
 
+def pprint(inp):
+    sp.pprint(inp)
+
 class Robot():
     def __init__(self, name, type_, dh_params):
+        '''
+        format of inputs:
+        type_(str): l - linear, r - rotary
+        dh_params(list): theta, d, alpha, a
+        '''
         self.name = name
-        self.type = type_ # l - linear, r - rotary
-        self.dh_params = dh_params # theta, d, alpha, a
-
-        self.forward_params = [] # used in forward kinematics
-        self.vel_params, self.acc_params = [], []
-        self.forward_mats = [] # used in dynamics
-        self.id_cache = None # inverse dynamics cache
-
+        self.type = type_
+        self.dh_params = dh_params
         self.t = sp.symbols('t', real=True)
+        self.clear_cache()
+
+    # clear the cache before you call solve_fk() second time with different dh_params than the ones initially provided
+    def clear_cache(self):
+        self.forward_params, self.forward_mats = [], []
+        self.vel_params, self.acc_params = [], []
+        self.tau_exprs = []
 
     def _screw_zx(self, i):
         if self.type[i] == 'r':
@@ -38,6 +47,7 @@ class Robot():
                             ])
         return screw_mat, theta, d, alpha, a, vel, acc
 
+    # forward kinematics
     def solve_fk(self, dh_params=None):
         if dh_params == None:
             dh_params = copy.deepcopy(self.dh_params)
@@ -74,32 +84,36 @@ class Robot():
         cost = ((qx_req - qx) ** 2 + (qy_req - qy) ** 2 + (qz_req - qz) ** 2) ** 0.5
         return cost
 
+    # inverse kinematics
     def solve_ik(self, end_pos, tol=None):
-        dh_params = copy.deepcopy(self.dh_params)
-        initial_guess = []
-        for i in range(len(dh_params)):
-            if self.type[i] == 'r':
-                initial_guess.append(dh_params[i][0])
-        cost_fn = partial(self._cost_fn_ik, end_pos=end_pos, dh_params=dh_params)
+        if self.type.count('l') == len(self.dh_params):
+            raise ValueError('can\'t optimize joint angles of linear joints')
+        else:
+            dh_params = copy.deepcopy(self.dh_params)
+            initial_guess = []
+            for i in range(len(dh_params)):
+                if self.type[i] == 'r':
+                    initial_guess.append(dh_params[i][0])
+            cost_fn = partial(self._cost_fn_ik, end_pos=end_pos, dh_params=dh_params)
 
-        if tol == None:
-            tol = 3e-4
-        result = minimize(cost_fn, initial_guess, tol=tol)
-        optim_thetas = result.x
+            if tol == None:
+                tol = 3e-4
+            result = minimize(cost_fn, initial_guess, tol=tol)
+            optim_thetas = result.x
 
-        j = 0
-        final_theta_vals = []
-        for i in range(len(dh_params)):
-            if self.type[i] == 'r':
-                theta = optim_thetas[j] 
-                dh_params[i][0] = theta
-                final_theta_vals.append(theta)
-                j += 1
-            else:
-                final_theta_vals.append(dh_params[i][0])
+            j = 0
+            final_theta_vals = []
+            for i in range(len(dh_params)):
+                if self.type[i] == 'r':
+                    theta = optim_thetas[j] 
+                    dh_params[i][0] = theta
+                    final_theta_vals.append(theta)
+                    j += 1
+                else:
+                    final_theta_vals.append(dh_params[i][0])
 
-        fk_mat = self.solve_fk(dh_params)[1]
-        return final_theta_vals, fk_mat
+            fk_mat = self.solve_fk(dh_params)[1]
+            return final_theta_vals, fk_mat
 
     def _get_q_idx(self, i):
         if self.type[i] == 'r':
@@ -161,10 +175,23 @@ class Robot():
             gravitational_force += val[0, 0]
         return gravitational_force
     
-    def solve_id(self, thetas, vels, accs, masses, dimensions):
+    # inverse dynamics
+    def solve_id(self, thetas, vels, accs, masses, dimensions, lengths=None):
         '''
         source: https://www.youtube.com/playlist?list=PLbRMhDVUMngcdUbBySzyzcPiFTYWr4rV_ lecture 24 to 29
 
+        format of inputs:
+        thetas = [theta_0, theta_1, ..., theta_n]
+        vels = [vel_0, vel_1, ..., vel_n]
+        accs = [acc_0, acc_1, ..., acc_n]
+        masses = [mass_0, mass_1, ..., mass_n]
+        dimensions = [[radius_0], [radius_1], ..., [radius_n]] for joints of circular cross-sections
+                   = [[a_0, b_0], [a_1, b_1], ..., [a_n, b_n]] for joints of rectangular cross-sections
+                     where a is the length and b is the breadth of the rectangular cross-section
+                   = [[radius_0], [a_1, b_1], [radius_2], ...] of course, it can be a combo of both
+        lengths = [length_0, length_1, ..., length_n]
+
+        formulation of inverse dynamics:
         n: number of joints
         J: interia tensor
         if rectangular_joint: m: mass of the joint, l: length of the joint, b: breadth of the joint
@@ -190,12 +217,7 @@ class Robot():
                     [-m*l/2, 0, 0, m]
                 ]
 
-        g = [
-                [0],
-                [-9.81],
-                [0],
-                [0]
-            ]
+        g = [0, -9.81, 0, 0].T
         ii_r = [-L_i/2, 0, 0, 1]
         
         U_ij = d_i0_T / dq_j
@@ -208,51 +230,53 @@ class Robot():
         h_icd = sum_j_max(i, c, d)_n(Tr(U_jcd * J_j * U_ji.T)); i, c, d = 1 to n # coriolis and centrifugal term
         C_i = sum_j_i_n(- m_j * g * U_ji * jj_r); i = 1 to n # gravity term
         '''
-
+        
         dh_params = copy.deepcopy(self.dh_params)
-        lengths = [dhp[3] for dhp in dh_params]
-        Js = []
-        for m, l, d in zip(masses, lengths, dimensions):
-            if len(d) == 1: # circular cross-section
-                r = d[0]
-                J = sp.Matrix([
-                                [m*(l**2)/3, 0, 0, -m*l/2],
-                                [0, m*(r**2)/4, 0, 0],
-                                [0, 0, m*(r**2)/4, 0],
-                                [-m*l/2, 0, 0, m]
-                            ])
-            elif len(d) == 2: # rectangular cross-section
-                a, b = d
-                J = sp.Matrix([
-                                [m*(a**2)/12, 0, 0, 0],
-                                [0, m*(l**2)/3, 0, -m*l/2],
-                                [0, 0, m*(b**2)/12, 0],
-                                [0, -m*(l**2)/2, 0, m]
-                            ])
-            Js.append(J)
+        if lengths == None:
+            lengths = [dhp[3] for dhp in dh_params]
 
-        g = sp.Matrix([0, -9.81, 0, 0]).T
-        rs = []
-        for l in lengths:
-            r = sp.Matrix([-l/2, 0, 0, 1])
-            rs.append(r)
+        if len(self.tau_exprs) == 0:
+            Js = []
+            for m, l, d in zip(masses, lengths, dimensions):
+                if len(d) == 1: # circular cross-section
+                    r = d[0]
+                    J = sp.Matrix([
+                                    [m*(l**2)/3, 0, 0, -m*l/2],
+                                    [0, m*(r**2)/4, 0, 0],
+                                    [0, 0, m*(r**2)/4, 0],
+                                    [-m*l/2, 0, 0, m]
+                                ])
+                elif len(d) == 2: # rectangular cross-section
+                    a, b = d
+                    J = sp.Matrix([
+                                    [m*(a**2)/12, 0, 0, 0],
+                                    [0, m*(l**2)/3, 0, -m*l/2],
+                                    [0, 0, m*(b**2)/12, 0],
+                                    [0, -m*(l**2)/2, 0, m]
+                                ])
+                Js.append(J)
 
-        tau_exprs = []
-        n = len(dh_params)
-        for i in range(n):
-            inertial_force = 0
-            coriolis_force = 0
-            for c in range(n):
-                inertial_force += self._inertial_force(i, c, n, Js)
-                for d in range(n):
-                    coriolis_force += self._coriolis_force(i, c, d, n, Js)
+            g = sp.Matrix([0, -9.81, 0, 0]).T
+            rs = []
+            for l in lengths:
+                r = sp.Matrix([-l/2, 0, 0, 1])
+                rs.append(r)
 
-            gravitational_force = self._gravitational_force(i, n, masses, g, rs) # C_i
-            tau_expr = inertial_force + coriolis_force + gravitational_force
-            tau_exprs.append(tau_expr)
+            n = len(dh_params)
+            for i in range(n):
+                inertial_force = 0
+                coriolis_force = 0
+                for c in range(n):
+                    inertial_force += self._inertial_force(i, c, n, Js)
+                    for d in range(n):
+                        coriolis_force += self._coriolis_force(i, c, d, n, Js)
+
+                gravitational_force = self._gravitational_force(i, n, masses, g, rs) # C_i
+                tau_expr = inertial_force + coriolis_force + gravitational_force
+                self.tau_exprs.append(tau_expr)
         
         '''
-        order of substitution: d, alpha, a, acc, vel, theta
+        order of substitution: d, alpha, acc, vel, theta, a
         values of higher order derivatives are substituted first and then the values of the lower ones,
         this is done to make sure that the lower order derivative values are not overwritten by the higher order ones
         to better understand this phenemenon, run this block of code:
@@ -269,7 +293,7 @@ class Robot():
         print(f'value obtained by substituting in this order: acc, val, theta: {value_1}')
         '''
 
-        d_alpha_dict = {}
+        d_alpha_dict = {} # wanted to keep a cache of this dict as it contains static values but sympy outputs unsolved expressions by using cached values, weird behavior
         acc_dict = {}
         vel_dict = {}
         theta_dict = {}
@@ -288,89 +312,54 @@ class Robot():
             acc_dict[ap] = a
 
         taus = []
-        for tau_expr in tau_exprs:
+        for tau_expr in self.tau_exprs:
             tau = tau_expr.subs(d_alpha_dict).subs(acc_dict).subs(vel_dict).subs(theta_dict).subs(a_dict)
             taus.append(tau)
-        return tau_exprs, taus
+        return self.tau_exprs, taus
 
     def _get_vals(self, list_):
         n = len(self.dh_params)
-        thetas, vels, accs = [], [], []
+        thetas, lengths, vels, accs = [], [], [], []
+        j = 0
         for i in range(len(list_)):
             val = list_[i]
             if 0 <= i < n:
-                thetas.append(val)
+                if self.type[j] == 'r':
+                    thetas.append(val) # this value will be optimized
+                    lengths.append(self.dh_params[j][3]) # whereas this value won't be optimized as this joint can't change it's length
+                elif self.type[j] == 'l':
+                    lengths.append(val) # this value will be optimized
+                    thetas.append(self.dh_params[j][0]) # whereas this value won't be optimized as this joint can't change its angle
+                j += 1
             elif n <= i < 2*n:
                 vels.append(val)
             else:
                 accs.append(val)
-        return thetas, vels, accs
+        return thetas, lengths, vels, accs
 
-    def _cost_fn_fd(self, initial_guess, masses, lengths, radii, taus_req):
-        thetas, vels, accs = self._get_vals(initial_guess)
-        taus = self.solve_id(thetas, vels, accs, masses, lengths, radii)[1]
+    def _cost_fn_fd(self, initial_guess, masses, dimensions, taus_req):
+        thetas, lengths, vels, accs = self._get_vals(initial_guess)
+        taus = self.solve_id(thetas, vels, accs, masses, dimensions, lengths)[1]
         cost = 0
         for tr, t in zip(taus_req, taus):
             cost += (tr - t) ** 2
         cost = cost ** 0.5
         return cost
 
-    def solve_fd(self, masses, lengths, radii, taus_req, tol=None):
-        initial_guess = [0 for _ in range(3*len(self.dh_params))] # 3 times the actual len coz we need to optimize theta, vel and acc
-        cost_fn = partial(self._cost_fn_fd, masses=masses, lengths=lengths, radii=radii, taus_req=taus_req)
-
+    # forward dynamics
+    def solve_fd(self, masses, dimensions, taus_req, tol=None):
+        initial_guess = [0 for _ in range(3*len(self.dh_params))]
+        cost_fn = partial(self._cost_fn_fd, masses=masses, dimensions=dimensions, taus_req=taus_req)
         if tol == None:
             tol = 3e-4
+
         result = minimize(cost_fn, initial_guess, tol=tol)
         optim_vals = result.x
         # optim_vals = initial_guess
-        thetas, vels, accs = self._get_vals(optim_vals)
-        taus = self.solve_id(thetas, vels, accs, masses, lengths, radii)[1]
+        thetas, lengths, vels, accs = self._get_vals(optim_vals)
+        taus = self.solve_id(thetas, vels, accs, masses, dimensions, lengths)[1]
+        optim_vals = {'thetas': thetas, 'lengths': lengths, 'vels': vels, 'accs': accs}
         return optim_vals, taus
         
     def __repr__(self):
         return f'Robot(name={self.name}, type={self.type})'
-
-if __name__ == '__main__':
-    dh_params = [
-         [math.pi // 2, 0, 0, 20],
-         [math.pi, 0, 0, 10],
-        ]
-    end_pos = [20, 20, 0] # qx, qy, qz
-    vels = [10, 5]
-    accs = [0, 0]
-    masses = [5, 7]
-    dimensions = [[10], [10]] # [[r1], [r2]]
-    taus_req = [50000, 700]
-
-    robot = Robot('hal', 'rr', dh_params)
-    print(robot, end='\n'*2)
-
-    # forward kinematics
-    fk_mat_expr, fk_mat = robot.solve_fk()
-    sp.pprint(fk_mat_expr); print();
-    sp.pprint(fk_mat); print();
-
-    # inverse kinematics
-    thetas, fk_mat = robot.solve_ik(end_pos)
-    print(thetas, end='\n'*2)
-    sp.pprint(fk_mat)
-
-    # inverse dynamics
-    tau_exprs, taus = robot.solve_id(thetas, vels, accs, masses, dimensions)
-    for tau_expr, tau in zip(tau_exprs, taus):
-        print('tau_expr:')
-        sp.pprint(tau_expr)
-        print(f'tau: {tau}', end='\n'*2)
-
-    exit()
-    # will take care of forward dynamics soon
-    # forward dynamics
-    optim_values, taus = robot.solve_fd(masses, lengths, radii, taus_req)
-    print(optim_values)
-    print(taus)
-
-    '''
-    TODO:
-    1. optimize forward dynamics logic by maintaining cache
-    '''
