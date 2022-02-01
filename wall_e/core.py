@@ -24,8 +24,8 @@ class Robot():
             acc = vel.diff(self.t)
             d, alpha, a = sp.symbols(f'd{i} alpha{i} a{i}', real=True)
         elif self.type[i] == 'l':
-            length = sp.Function(f'a{i}')(self.t)
-            vel = theta.diff(self.t)
+            a = sp.Function(f'a{i}')(self.t)
+            vel = a.diff(self.t)
             acc = vel.diff(self.t)
             theta, d, alpha = sp.symbols(f'theta{i} d{i} alpha{i}', real=True)
 
@@ -210,18 +210,19 @@ class Robot():
         '''
 
         dh_params = copy.deepcopy(self.dh_params)
+        lengths = [dhp[3] for dhp in dh_params]
         Js = []
-        for m, d in zip(masses, dimensions):
-            if len(d) == 2: # circular cross-section
-                l, r = d
+        for m, l, d in zip(masses, lengths, dimensions):
+            if len(d) == 1: # circular cross-section
+                r = d[0]
                 J = sp.Matrix([
                                 [m*(l**2)/3, 0, 0, -m*l/2],
                                 [0, m*(r**2)/4, 0, 0],
                                 [0, 0, m*(r**2)/4, 0],
                                 [-m*l/2, 0, 0, m]
                             ])
-            elif len(d) == 3: # rectangular cross-section
-                l, a, b = d
+            elif len(d) == 2: # rectangular cross-section
+                a, b = d
                 J = sp.Matrix([
                                 [m*(a**2)/12, 0, 0, 0],
                                 [0, m*(l**2)/3, 0, -m*l/2],
@@ -232,8 +233,7 @@ class Robot():
 
         g = sp.Matrix([0, -9.81, 0, 0]).T
         rs = []
-        for d in dimensions:
-            l = d[0]
+        for l in lengths:
             r = sp.Matrix([-l/2, 0, 0, 1])
             rs.append(r)
 
@@ -269,16 +269,19 @@ class Robot():
         print(f'value obtained by substituting in this order: acc, val, theta: {value_1}')
         '''
 
-        d_alpha_a_dict = {}
+        d_alpha_dict = {}
         acc_dict = {}
         vel_dict = {}
         theta_dict = {}
+        a_dict = {}
         for p, dhp, t in zip(self.forward_params, dh_params, thetas):
             for i in range(len(p)):
-                if i != 0:
-                    d_alpha_a_dict[p[i]] = dhp[i]
-                else:
+                if i == 0:
                     theta_dict[p[i]] = t
+                elif i == 3:
+                    a_dict[p[i]] = dhp[i]
+                else:
+                    d_alpha_dict[p[i]] = dhp[i]
         for vp, v in zip(self.vel_params, vels):
             vel_dict[vp] = v
         for ap, a in zip(self.acc_params, accs):
@@ -286,7 +289,7 @@ class Robot():
 
         taus = []
         for tau_expr in tau_exprs:
-            tau = tau_expr.subs(d_alpha_a_dict).subs(acc_dict).subs(vel_dict).subs(theta_dict)
+            tau = tau_expr.subs(d_alpha_dict).subs(acc_dict).subs(vel_dict).subs(theta_dict).subs(a_dict)
             taus.append(tau)
         return tau_exprs, taus
 
@@ -337,7 +340,7 @@ if __name__ == '__main__':
     vels = [10, 5]
     accs = [0, 0]
     masses = [5, 7]
-    dimensions = [[20, 10], [10, 10]] # [[l1, r1], [l2, r2]]
+    dimensions = [[10], [10]] # [[r1], [r2]]
     taus_req = [50000, 700]
 
     robot = Robot('hal', 'rr', dh_params)
@@ -369,7 +372,5 @@ if __name__ == '__main__':
 
     '''
     TODO:
-    1. generalize the values of q(theta/length)
-    2. generalize the shape(circular/rectangular)
-    3. optimize forward dynamics logic by maintaining cache
+    1. optimize forward dynamics logic by maintaining cache
     '''
