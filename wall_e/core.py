@@ -167,7 +167,6 @@ class Robot():
                     [0, 0, m*(b**2)/12, 0],
                     [0, -m*(l**2)/2, 0, m]
                 ] 
-
         elif circular_joint:
             J = [
                     [m*(l**2)/3, 0, 0, -m*l/2],
@@ -209,8 +208,8 @@ class Robot():
                             [-m*l/2, 0, 0, m]
                         ])
             Js.append(J)
-        g = sp.Matrix([0, -9.81, 0, 0]).T
 
+        g = sp.Matrix([0, -9.81, 0, 0]).T
         rs = []
         for l in lengths:
             r = sp.Matrix([-l/2, 0, 0, 1])
@@ -257,10 +256,8 @@ class Robot():
                     d_alpha_a_dict[p[i]] = dhp[i]
                 else:
                     theta_dict[p[i]] = t
-
         for vp, v in zip(self.vel_params, vels):
             vel_dict[vp] = v
-
         for ap, a in zip(self.acc_params, accs):
             acc_dict[ap] = a
 
