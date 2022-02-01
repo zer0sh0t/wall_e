@@ -4,8 +4,7 @@ import sympy as sp
 from functools import partial
 from scipy.optimize import minimize
 
-def pprint(inp):
-    sp.pprint(inp)
+pprint = lambda inp: sp.pprint(inp)
 
 class Robot():
     def __init__(self, name, type_, dh_params):
@@ -355,7 +354,6 @@ class Robot():
 
         result = minimize(cost_fn, initial_guess, tol=tol)
         optim_vals = result.x
-        # optim_vals = initial_guess
         thetas, lengths, vels, accs = self._get_vals(optim_vals)
         taus = self.solve_id(thetas, vels, accs, masses, dimensions, lengths)[1]
         optim_vals = {'thetas': thetas, 'lengths': lengths, 'vels': vels, 'accs': accs}
