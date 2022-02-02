@@ -28,7 +28,7 @@ class Robot():
         self.t = sp.symbols('t', real=True)
         self.clear_cache()
 
-    # clear the cache before you call solve_fk() second time with different dh_params than the ones initially provided
+    # clear the cache if you want to call solve_fk() for the second with different set of dh_params
     def clear_cache(self):
         self.forward_params, self.forward_mats = [], []
         self.vel_params, self.acc_params = [], []
