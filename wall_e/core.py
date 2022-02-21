@@ -2,7 +2,9 @@ import math
 import copy
 import sympy as sp
 from functools import partial
+import matplotlib.pyplot as plt
 from scipy.optimize import minimize
+from matplotlib.animation import FuncAnimation
 
 pprint = lambda inp: sp.pprint(inp)
 
@@ -25,7 +27,7 @@ class Robot():
         self.masses = masses
         self.lengths = lengths
         self.dimensions = dimensions
-        self.t = sp.symbols('t', real=True)
+        self.t = sp.symbols('t', real=True) # time
         self.clear_cache()
 
     # clear the cache if you want to call solve_fk() for the second with different set of dh_params
@@ -87,9 +89,9 @@ class Robot():
                 j += 1 
     
         fk_mat = self.solve_fk(dh_params)[1]
-        qx, qy, qz = float(fk_mat[0, 3]), float(fk_mat[1, 3]), float(fk_mat[2, 3])
-        qx_req, qy_req, qz_req = end_pos
-        cost = ((qx_req - qx) ** 2 + (qy_req - qy) ** 2 + (qz_req - qz) ** 2) ** 0.5
+        qx, qy = float(fk_mat[0, 3]), float(fk_mat[1, 3])
+        qx_req, qy_req, _ = end_pos
+        cost = ((qx_req - qx) ** 2 + (qy_req - qy) ** 2) ** 0.5 # don't optimize for z coordinate, just rotate the robot about z-axis to reach the given z-plane
         return cost
 
     # inverse kinematics
@@ -119,8 +121,10 @@ class Robot():
                     j += 1
                 else:
                     final_theta_vals.append(dh_params[i][0])
-
+            
+            qz_req = end_pos[2]
             fk_mat = self.solve_fk(dh_params)[1]
+            fk_mat[2, 3] = qz_req # just rotate the robot about z-axis to reach the given z-plane
             return final_theta_vals, fk_mat
 
     def _get_q_idx(self, i):
@@ -363,5 +367,120 @@ class Robot():
         optim_vals = {'thetas': thetas, 'lengths': lengths, 'vels': vels, 'accs': accs}
         return optim_vals, taus
         
+    def _get_pts(self, s_pt, length, angle, e_z):
+        x, y, z = s_pt
+        end_x = x + length * math.cos(angle)
+        end_y = y + length * math.sin(angle)
+        return (end_x, end_y, e_z)
+
+    def _render(self, angles, lengths, e_z, reinit):
+        if angles == None:
+            angles = [dhp[0] for dhp in self.dh_params]
+        if lengths == None:
+            lengths = copy.deepcopy(self.lengths)
+        
+        if reinit:
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
+        else:
+            fig = self.fig
+            ax = self.ax
+            ax.clear()
+        ax.set_title(f'{self.name}')
+
+        s_pt = (0, 0, 0)
+        for i in range(len(angles)):
+            if i != 0:
+                angle = angles[i] + angles[i-1]
+                z = e_z
+                c = 'r'
+            else:
+                angle = angles[i]
+                z = 0
+                c = 'm'
+            
+            e_pt = self._get_pts(s_pt, lengths[i], angle, e_z)
+            ax.scatter(z, s_pt[1], zs=s_pt[0], c=c)
+            ax.plot([s_pt[2], e_pt[2]], [s_pt[1], e_pt[1]], zs=[s_pt[0], e_pt[0]], c='b')
+            s_pt = e_pt
+        ax.scatter(z, s_pt[1], zs=s_pt[0], c='g')
+
+    def render(self, angles=None, lengths=None, e_z=0):
+        self._render(angles, lengths, e_z, True)
+        plt.show()
+
+    def move(self, end_pos=None, taus=None):
+        '''
+        end_pos(tuple): (x_final, y_final, z_final)
+        taus(list): [tau_0, tau_1, ...]
+        '''
+        if len(self.forward_mats) == 0:
+            _, _ = self.solve_fk() # collect cache
+
+        if end_pos != None: # get angles using inveres kinematics
+            thetas, _ = self.solve_ik(end_pos)
+            lengths = None
+        elif taus != None: # get angles using forward dynamics
+            dummy_vals = [0 for _ in range(len(self.dh_params))]
+            _, _ = self.solve_id(dummy_vals, dummy_vals, dummy_vals)
+            optim_vals, _ = self.solve_fd(taus)
+            thetas, lengths = optim_vals['thetas'], optim_vals['thetas']
+            end_pos = (0, 0, 0)
+        else:
+            raise ValueError('please specify either the end position or the forces applied on the joints!!')
+        self.render(angles=thetas, lengths=lengths, e_z=end_pos[2])
+
+    def _create_anim(self):
+        self.fig = plt.figure()
+        self.ax = self.fig.add_subplot(111, projection='3d')
+
+    def _anim_fn(self, i, thetas_across_time, end_z):
+        ts = len(thetas_across_time)
+        e_z = (3 * end_z / (ts**2)) * (i**2) - (2 * end_z / (ts**3)) * (i**3)
+        self._render(angles=thetas_across_time[i], lengths=None, e_z=e_z, reinit=False) 
+    def move_traj(self, end_pos, ts, fn='cubic', final_vels=None, final_accs=None):
+        if fn not in ['cubic', 'cubic_dot', 'fifth']:
+            raise ValueError('please input a valid trajectory function!!')
+
+        ts -= 1
+        if len(self.forward_mats) == 0:
+            _, _ = self.solve_fk() # collect cache
+        init_angles = [dhp[0] for dhp in self.dh_params]
+        final_angles, _ = self.solve_ik(end_pos)
+        
+        if fn != 'cubic':
+            vel_i = 0
+        if fn == 'fifth':
+            acc_i = 0
+        
+        ts += 1
+        thetas_across_time = []
+        for t in range(ts):
+            thetas = []
+            for i in range(len(init_angles)):
+                th_i, th_f = init_angles[i], final_angles[i]
+                if fn != 'cubic':
+                    vel_f = final_vels[i]
+                if fn == 'fifth':
+                    acc_f = final_accs[i]
+
+                if fn == 'cubic':
+                    theta = th_i + (3 * (th_f - th_i) / (ts**2)) * (t**2) - (2 * (th_f - th_i) / (ts**3)) * (t**3)
+                elif fn == 'cubic_dot':
+                    theta = th_i + vel_i * t + ((3 * (th_f - th_i) / (ts**2)) - (2 * vel_i / ts) - (vel_f / ts)) * (t**2) + \
+                            ((- 2 * (th_f - th_i) / (ts**3)) + ((vel_f + vel_i) / (ts**2))) * (t**3)
+                elif fn == 'fifth':
+                    theta =  th_i + vel_i * t + (acc_i * (t**2) / 2) + ((20 * (th_f - th_i) - (8 * vel_f + 12 * vel_i) * ts - \
+                            (3 * acc_i - acc_f) * (ts**2)) / 2 * (ts**3)) * (t**3) + ((30 * (th_i - th_f) + (14 * vel_f + 16 * vel_i) * ts + \
+                            (3 * acc_i - 2 * acc_f) * (ts**2)) / 2 * (ts**4)) * (t**4)+ ((12 * (th_f - th_i) - 6 * (vel_f + vel_i) * ts - (acc_i - acc_f) * (ts**2)) / 2 * (ts**5)) * (t**5)
+                
+                thetas.append(theta)
+            thetas_across_time.append(thetas)
+
+        self._create_anim()
+        anim_fn = partial(self._anim_fn, thetas_across_time=thetas_across_time, end_z=end_pos[2])
+        anim = FuncAnimation(self.fig, anim_fn, frames=ts, repeat=False)
+        plt.show()
+
     def __repr__(self):
         return f'Robot(name={self.name}, type={self.type})'
