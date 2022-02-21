@@ -438,6 +438,7 @@ class Robot():
         ts = len(thetas_across_time)
         e_z = (3 * end_z / (ts**2)) * (i**2) - (2 * end_z / (ts**3)) * (i**3)
         self._render(angles=thetas_across_time[i], lengths=None, e_z=e_z, reinit=False) 
+
     def move_traj(self, end_pos, ts, fn='cubic', final_vels=None, final_accs=None):
         if fn not in ['cubic', 'cubic_dot', 'fifth']:
             raise ValueError('please input a valid trajectory function!!')
