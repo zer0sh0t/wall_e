@@ -282,25 +282,39 @@ class Robot():
                 tau_expr = inertial_force + coriolis_force + gravitational_force
                 self.tau_exprs.append(tau_expr)
         
-        '''
-        order of substitution: d, alpha, acc, vel, theta, a
-        values of higher order derivatives are substituted first and then the values of the lower ones,
-        this is done to make sure that the lower order derivative values are not overwritten by the higher order ones
-        to better understand this phenemenon, run this block of code:
+            '''
+            order of substitution: d, alpha, acc, vel, theta, a
+            values of higher order derivatives are substituted first and then the values of the lower ones,
+            this is done to make sure that the lower order derivative values are not overwritten by the higher order ones
+            to better understand this phenemenon, run this block of code:
 
-        t = sp.symbols('t', real=True)
-        theta_expr = sp.Function('theta')(t)
-        vel_expr, acc_expr = theta_expr.diff(t), theta_expr.diff(t, 2)
+            t = sp.symbols('t', real=True)
+            theta_expr = sp.Function('theta')(t)
+            vel_expr, acc_expr = theta_expr.diff(t), theta_expr.diff(t, 2)
 
-        theta, vel, acc = 10, 20, 30
-        eq = theta_expr + vel_expr + acc_expr # the expected value of this equation is 60
-        value_0 = eq.subs(theta_expr, theta).subs(vel_expr, vel). subs(acc_expr, acc)
-        value_1 = eq.subs(acc_expr, acc).subs(vel_expr, vel).subs(theta_expr, theta)
-        print(f'value obtained by substituting in this order: theta, val, acc: {value_0}')
-        print(f'value obtained by substituting in this order: acc, val, theta: {value_1}')
-        '''
+            theta, vel, acc = 10, 20, 30
+            eq = theta_expr + vel_expr + acc_expr # the expected value of this equation is 60
+            value_0 = eq.subs(theta_expr, theta).subs(vel_expr, vel). subs(acc_expr, acc)
+            value_1 = eq.subs(acc_expr, acc).subs(vel_expr, vel).subs(theta_expr, theta)
+            print(f'value obtained by substituting in this order: theta, val, acc: {value_0}')
+            print(f'value obtained by substituting in this order: acc, val, theta: {value_1}')
+            '''
 
-        d_alpha_dict = {} # wanted to keep a cache of this dict as it contains static values but sympy outputs unsolved expressions by using cached values, weird behavior
+            d_alpha_dict = {} # wanted to keep a cache of this dict as it contains static values but sympy outputs unsolved expressions by using cached values, weird behavior
+            for p, dhp in zip(self.forward_params, dh_params):
+                for i in range(len(p)):
+                    if i == 0:
+                        pass
+                    elif i == 3:
+                        pass
+                    else:
+                        d_alpha_dict[p[i]] = dhp[i]
+
+            for i in range(len(self.tau_exprs)):
+                tau_expr = self.tau_exprs[i]
+                actual_tau_expr = tau_expr.subs(d_alpha_dict)
+                self.tau_exprs[i] = actual_tau_expr
+
         acc_dict = {}
         vel_dict = {}
         theta_dict = {}
@@ -312,7 +326,7 @@ class Robot():
                 elif i == 3:
                     a_dict[p[i]] = dhp[i]
                 else:
-                    d_alpha_dict[p[i]] = dhp[i]
+                    pass
         for vp, v in zip(self.vel_params, vels):
             vel_dict[vp] = v
         for ap, a in zip(self.acc_params, accs):
@@ -320,7 +334,7 @@ class Robot():
 
         taus = []
         for tau_expr in self.tau_exprs:
-            tau = tau_expr.subs(d_alpha_dict).subs(acc_dict).subs(vel_dict).subs(theta_dict).subs(a_dict)
+            tau = tau_expr.subs(acc_dict).subs(vel_dict).subs(theta_dict).subs(a_dict)
             taus.append(tau)
         return self.tau_exprs, taus
 
