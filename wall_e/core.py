@@ -90,9 +90,9 @@ class Robot():
                 j += 1 
     
         fk_mat = self.solve_fk(dh_params)[1]
-        qx, qy = float(fk_mat[0, 3]), float(fk_mat[1, 3])
-        qx_req, qy_req, _ = end_pos
-        cost = ((qx_req - qx) ** 2 + (qy_req - qy) ** 2) ** 0.5
+        qx, qy, qz = float(fk_mat[0, 3]), float(fk_mat[1, 3]), float(fk_mat[2, 3])
+        qx_req, qy_req, qz_req = end_pos
+        cost = ((qx_req - qx) ** 2 + (qy_req - qy) ** 2 + (qz_req - qz) ** 2) ** 0.5
         return cost
 
     # inverse kinematics
