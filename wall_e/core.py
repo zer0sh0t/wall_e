@@ -325,7 +325,7 @@ class Robot():
                 if i == 0:
                     theta_dict[p[i]] = t
                 elif i == 1:
-                    d_dict[p[i]] = dhp[i]
+                    d_dict[p[i]] = ds
                 else:
                     pass
         for vp, v in zip(self.vel_params, vels):
