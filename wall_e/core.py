@@ -2,9 +2,10 @@ import math
 import copy
 import sympy as sp
 from functools import partial
-import matplotlib.pyplot as plt
 from scipy.optimize import minimize
-from matplotlib.animation import FuncAnimation
+
+# import matplotlib.pyplot as plt
+# from matplotlib.animation import FuncAnimation
 
 pprint = lambda inp: sp.pprint(inp)
 
@@ -381,195 +382,197 @@ class Robot():
         taus = self.solve_id(thetas, vels, accs, ds)[1]
         optim_vals = {'thetas': thetas, 'offsets(d)': ds, 'vels': vels, 'accs': accs}
         return optim_vals, taus
-        
-    def _get_pts(self, s_pt, length, angle, d, init_z=0):
-        x, y, z = s_pt
-        end_x = x + length * math.cos(angle)
-        end_y = y + length * math.sin(angle)
-        end_z = z + d + init_z
-        offset_pts = (end_x, end_y, z + init_z)
-        end_pts = (end_x, end_y, end_z)
-        return offset_pts, end_pts
-
-    def _render(self, angles, ds, init_z, reinit):
-        if angles == None:
-            angles = [dhp[0] for dhp in self.dh_params]
-        if ds == None:
-            ds = [dhp[1] for dhp in self.dh_params]
-        lengths = copy.deepcopy(self.lengths)
-        
-        if reinit:
-            fig = plt.figure()
-            ax = fig.add_subplot(111, projection='3d')
-        else:
-            fig = self.fig
-            ax = self.ax
-            ax.clear()
-        ax.set_title(f'{self.name}')
-
-        s_pt = (0, 0, 0)
-        for i in range(len(angles)):
-            if i != 0:
-                angle = angles[i] + angles[i-1]
-                iz = 0
-                c = 'r'
-            else:
-                angle = angles[i]
-                iz = init_z
-                c = 'm' # base
-            
-            o_pt, e_pt = self._get_pts(s_pt, lengths[i], angle, ds[i], iz)
-            ax.scatter(s_pt[2], s_pt[1], zs=s_pt[0], c=c) # current point
-            ax.scatter(o_pt[2], o_pt[1], zs=o_pt[0], c='r') # offset point
-
-            # s_pt -> o_pt -> e_pt
-            ax.plot([s_pt[2], o_pt[2]], [s_pt[1], o_pt[1]], zs=[s_pt[0], o_pt[0]], c='b')
-            ax.plot([o_pt[2], e_pt[2]], [o_pt[1], e_pt[1]], zs=[o_pt[0], e_pt[0]], c='b')
-            s_pt = e_pt
-        ax.scatter(s_pt[2], s_pt[1], zs=s_pt[0], c='g') # end effector
-
-    # render the robot at home position provided in the dh paramters
-    def render(self, angles=None, ds=None, init_z=0):
-        self._render(angles, ds, init_z, True)
-        plt.show()
-
-    def move(self, end_pos=None, thetas=None, ds=None, ret=False):
-        '''
-        moves the robot to the given position/angle
-        provide either end_pos or thetas
-
-        end_pos(tuple): (x_final, y_final, z_final)
-        thetas(list): [theta_0, theta_1, ...]
-        optional:
-        ds(list): [d_0, d_1, ...]
-        '''
-        if len(self.forward_mats) == 0:
-            _, _ = self.solve_fk() # collect cache
-
-        if end_pos != None: # get angles using inveres kinematics
-            thetas, _ = self.solve_ik(end_pos)
-        elif thetas != None:
-            pass # we've got everything we need
-        else:
-            raise ValueError('please specify either the end position or the joint angles!!')
-
-        if ds == None:
-            home_z = sum([dhp[1] for dhp in self.dh_params])
-        else:
-            home_z = sum(ds)
-
-        # if end_pos[2] > home_z:
-        #     init_z = end_pos[2] - home_z
-        # else:
-        #     init_z = - (abs(end_pos[2]) - home_z)
-        init_z = end_pos[2] - home_z
-
-        if ret:
-            return thetas, init_z
-        else:
-            self.render(angles=thetas, ds=ds, init_z=init_z)
-
-    def _cubic_fn(self, q_i, q_f, ts, t):
-        val = q_i + (3 * (q_f - q_i) / (ts**2)) * (t**2) - (2 * (q_f - q_i) / (ts**3)) * (t**3)
-        return val
-
-    def _cubic_dot_fn(self, q_i, q_f, vel_i, vel_f, ts, t):
-        val = q_i + vel_i * t + ((3 * (q_f - q_i) / (ts**2)) - (2 * vel_i / ts) - (vel_f / ts)) * (t**2) + \
-              ((- 2 * (q_f - q_i) / (ts**3)) + ((vel_f + vel_i) / (ts**2))) * (t**3)
-        return val
-
-    def _fifth_fn(self, th_i, th_f, vel_i, vel_f, acc_i, acc_f, ts, t):
-        val = th_i + vel_i * t + (acc_i * (t**2) / 2) + ((20 * (th_f - th_i) - (8 * vel_f + 12 * vel_i) * ts - \
-              (3 * acc_i - acc_f) * (ts**2)) / 2 * (ts**3)) * (t**3) + ((30 * (th_i - th_f) + (14 * vel_f + 16 * vel_i) * ts + \
-              (3 * acc_i - 2 * acc_f) * (ts**2)) / 2 * (ts**4)) * (t**4)+ ((12 * (th_f - th_i) - 6 * (vel_f + vel_i) * ts - \
-              (acc_i - acc_f) * (ts**2)) / 2 * (ts**5)) * (t**5) 
-        return val
-
-    def _create_anim(self):
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(111, projection='3d')
-
-    def _anim_fn(self, i, thetas_across_time, ds_across_time, init_z):
-        z = self._cubic_fn(0, init_z, len(thetas_across_time)-1, i) # smooth translation towards the end z plane
-        self._render(angles=thetas_across_time[i], ds=ds_across_time[i], init_z=z, reinit=False) 
-
-    def move_traj(self, ts, end_pos=None, final_angles=None, final_ds=None, fn='cubic', final_vels=None, final_accs=None):
-        '''
-        plots the trajectory of the robot
-        provide either end_pos or final_angles
-
-        ts(int): time taken by the robot to reach end position/final angles
-        end_pos(tuple): (x_final, y_final, z_final)
-        final_angles(list): [theta_0, theta_1, ...]
-
-        fn(str): 'cubic', 'cubic_dot' or 'fifth'
-        'cubic' - use this if final_vels == None
-        'cubic_dot' - use this if final_vels != None but final_accs == None
-        'fifth' - use this if final_vels != None and final_accs != None
-
-        optional:
-        final_ds(list): [d_0, d_1, ...] # for linear joints
-        final_vels(list): [vel_0, vel_1, ...]
-        final_accs(list): [acc_0, acc_1, ...]
-        '''
-        if fn not in ['cubic', 'cubic_dot', 'fifth']:
-            raise ValueError('please input a valid trajectory function!!')
-
-        init_angles = [dhp[0] for dhp in self.dh_params]
-        init_ds = [dhp[1] for dhp in self.dh_params]
-        if end_pos != None:
-            final_angles, init_z = self.move(end_pos, ret=True)
-        
-        if fn != 'cubic':
-            vel_i = 0
-        if fn == 'fifth':
-            acc_i = 0
-        
-        thetas_across_time = []
-        ds_across_time = []
-        for t in range(ts):
-            thetas = []
-            ds = []
-
-            for i in range(len(self.dh_params)):
-                if self.type[i] == 'r':
-                    q_i, q_f = init_angles[i], final_angles[i]
-                elif self.type[i] == 'l':
-                    q_i = init_ds[i]
-                    if final_ds != None:
-                        q_f = final_ds[i]
-                    else:
-                        q_f = q_i
-
-                if fn != 'cubic':
-                    vel_f = final_vels[i]
-                if fn == 'fifth':
-                    acc_f = final_accs[i]
-
-                if q_f != q_i: # happens only when the linear joint's offset is not changed across time
-                    if fn == 'cubic':
-                        val = self._cubic_fn(q_i, q_f, ts-1, t)
-                    elif fn == 'cubic_dot':
-                        val = self._cubic_dot_fn(q_i, q_f, vel_i, vel_f, ts-1, t)
-                    elif fn == 'fifth':
-                        val = self._fifth_fn(q_i, q_f, vel_i, vel_f, acc_i, acc_f, ts-1, t)
-                else:
-                    val = q_i
-                
-                if self.type[i] == 'r':
-                    thetas.append(val)
-                    ds.append(self.dh_params[i][1])
-                elif self.type[i] == 'l':
-                    ds.append(val)
-                    thetas.append(self.dh_params[i][0])
-
-            thetas_across_time.append(thetas)
-            ds_across_time.append(ds)
-
-        self._create_anim()
-        anim_fn = partial(self._anim_fn, thetas_across_time=thetas_across_time, ds_across_time=ds_across_time, init_z=init_z)
-        anim = FuncAnimation(self.fig, anim_fn, frames=ts, repeat=False)
-        plt.show()
 
     def __repr__(self):
         return f'Robot(name={self.name}, type={self.type})'
+        
+# experimental stuff    
+#########################################
+#     def _get_pts(self, s_pt, length, angle, d, init_z=0):
+#         x, y, z = s_pt
+#         end_x = x + length * math.cos(angle)
+#         end_y = y + length * math.sin(angle)
+#         end_z = z + d + init_z
+#         offset_pts = (end_x, end_y, z + init_z)
+#         end_pts = (end_x, end_y, end_z)
+#         return offset_pts, end_pts
+# 
+#     def _render(self, angles, ds, init_z, reinit):
+#         if angles == None:
+#             angles = [dhp[0] for dhp in self.dh_params]
+#         if ds == None:
+#             ds = [dhp[1] for dhp in self.dh_params]
+#         lengths = copy.deepcopy(self.lengths)
+#         
+#         if reinit:
+#             fig = plt.figure()
+#             ax = fig.add_subplot(111, projection='3d')
+#         else:
+#             fig = self.fig
+#             ax = self.ax
+#             ax.clear()
+#         ax.set_title(f'{self.name}')
+# 
+#         s_pt = (0, 0, 0)
+#         for i in range(len(angles)):
+#             if i != 0:
+#                 angle = angles[i] + angles[i-1]
+#                 iz = 0
+#                 c = 'r'
+#             else:
+#                 angle = angles[i]
+#                 iz = init_z
+#                 c = 'm' # base
+#             
+#             o_pt, e_pt = self._get_pts(s_pt, lengths[i], angle, ds[i], iz)
+#             ax.scatter(s_pt[2], s_pt[1], zs=s_pt[0], c=c) # current point
+#             ax.scatter(o_pt[2], o_pt[1], zs=o_pt[0], c='r') # offset point
+# 
+#             # s_pt -> o_pt -> e_pt
+#             ax.plot([s_pt[2], o_pt[2]], [s_pt[1], o_pt[1]], zs=[s_pt[0], o_pt[0]], c='b')
+#             ax.plot([o_pt[2], e_pt[2]], [o_pt[1], e_pt[1]], zs=[o_pt[0], e_pt[0]], c='b')
+#             s_pt = e_pt
+#         ax.scatter(s_pt[2], s_pt[1], zs=s_pt[0], c='g') # end effector
+# 
+#     # render the robot at home position provided in the dh paramters
+#     def render(self, angles=None, ds=None, init_z=0):
+#         self._render(angles, ds, init_z, True)
+#         plt.show()
+# 
+#     def move(self, end_pos=None, thetas=None, ds=None, ret=False):
+#         '''
+#         moves the robot to the given position/angle
+#         provide either end_pos or thetas
+# 
+#         end_pos(tuple): (x_final, y_final, z_final)
+#         thetas(list): [theta_0, theta_1, ...]
+#         optional:
+#         ds(list): [d_0, d_1, ...]
+#         '''
+#         if len(self.forward_mats) == 0:
+#             _, _ = self.solve_fk() # collect cache
+# 
+#         if end_pos != None: # get angles using inveres kinematics
+#             thetas, _ = self.solve_ik(end_pos)
+#         elif thetas != None:
+#             pass # we've got everything we need
+#         else:
+#             raise ValueError('please specify either the end position or the joint angles!!')
+# 
+#         if ds == None:
+#             home_z = sum([dhp[1] for dhp in self.dh_params])
+#         else:
+#             home_z = sum(ds)
+# 
+#         # if end_pos[2] > home_z:
+#         #     init_z = end_pos[2] - home_z
+#         # else:
+#         #     init_z = - (abs(end_pos[2]) - home_z)
+#         init_z = end_pos[2] - home_z
+# 
+#         if ret:
+#             return thetas, init_z
+#         else:
+#             self.render(angles=thetas, ds=ds, init_z=init_z)
+# 
+#     def _cubic_fn(self, q_i, q_f, ts, t):
+#         val = q_i + (3 * (q_f - q_i) / (ts**2)) * (t**2) - (2 * (q_f - q_i) / (ts**3)) * (t**3)
+#         return val
+# 
+#     def _cubic_dot_fn(self, q_i, q_f, vel_i, vel_f, ts, t):
+#         val = q_i + vel_i * t + ((3 * (q_f - q_i) / (ts**2)) - (2 * vel_i / ts) - (vel_f / ts)) * (t**2) + \
+#               ((- 2 * (q_f - q_i) / (ts**3)) + ((vel_f + vel_i) / (ts**2))) * (t**3)
+#         return val
+# 
+#     def _fifth_fn(self, th_i, th_f, vel_i, vel_f, acc_i, acc_f, ts, t):
+#         val = th_i + vel_i * t + (acc_i * (t**2) / 2) + ((20 * (th_f - th_i) - (8 * vel_f + 12 * vel_i) * ts - \
+#               (3 * acc_i - acc_f) * (ts**2)) / 2 * (ts**3)) * (t**3) + ((30 * (th_i - th_f) + (14 * vel_f + 16 * vel_i) * ts + \
+#               (3 * acc_i - 2 * acc_f) * (ts**2)) / 2 * (ts**4)) * (t**4)+ ((12 * (th_f - th_i) - 6 * (vel_f + vel_i) * ts - \
+#               (acc_i - acc_f) * (ts**2)) / 2 * (ts**5)) * (t**5) 
+#         return val
+# 
+#     def _create_anim(self):
+#         self.fig = plt.figure()
+#         self.ax = self.fig.add_subplot(111, projection='3d')
+# 
+#     def _anim_fn(self, i, thetas_across_time, ds_across_time, init_z):
+#         z = self._cubic_fn(0, init_z, len(thetas_across_time)-1, i) # smooth translation towards the end z plane
+#         self._render(angles=thetas_across_time[i], ds=ds_across_time[i], init_z=z, reinit=False) 
+# 
+#     def move_traj(self, ts, end_pos=None, final_angles=None, final_ds=None, fn='cubic', final_vels=None, final_accs=None):
+#         '''
+#         plots the trajectory of the robot
+#         provide either end_pos or final_angles
+# 
+#         ts(int): time taken by the robot to reach end position/final angles
+#         end_pos(tuple): (x_final, y_final, z_final)
+#         final_angles(list): [theta_0, theta_1, ...]
+# 
+#         fn(str): 'cubic', 'cubic_dot' or 'fifth'
+#         'cubic' - use this if final_vels == None
+#         'cubic_dot' - use this if final_vels != None but final_accs == None
+#         'fifth' - use this if final_vels != None and final_accs != None
+# 
+#         optional:
+#         final_ds(list): [d_0, d_1, ...] # for linear joints
+#         final_vels(list): [vel_0, vel_1, ...]
+#         final_accs(list): [acc_0, acc_1, ...]
+#         '''
+#         if fn not in ['cubic', 'cubic_dot', 'fifth']:
+#             raise ValueError('please input a valid trajectory function!!')
+# 
+#         init_angles = [dhp[0] for dhp in self.dh_params]
+#         init_ds = [dhp[1] for dhp in self.dh_params]
+#         if end_pos != None:
+#             final_angles, init_z = self.move(end_pos, ret=True)
+#         
+#         if fn != 'cubic':
+#             vel_i = 0
+#         if fn == 'fifth':
+#             acc_i = 0
+#         
+#         thetas_across_time = []
+#         ds_across_time = []
+#         for t in range(ts):
+#             thetas = []
+#             ds = []
+# 
+#             for i in range(len(self.dh_params)):
+#                 if self.type[i] == 'r':
+#                     q_i, q_f = init_angles[i], final_angles[i]
+#                 elif self.type[i] == 'l':
+#                     q_i = init_ds[i]
+#                     if final_ds != None:
+#                         q_f = final_ds[i]
+#                     else:
+#                         q_f = q_i
+# 
+#                 if fn != 'cubic':
+#                     vel_f = final_vels[i]
+#                 if fn == 'fifth':
+#                     acc_f = final_accs[i]
+# 
+#                 if q_f != q_i: # happens only when the linear joint's offset is not changed across time
+#                     if fn == 'cubic':
+#                         val = self._cubic_fn(q_i, q_f, ts-1, t)
+#                     elif fn == 'cubic_dot':
+#                         val = self._cubic_dot_fn(q_i, q_f, vel_i, vel_f, ts-1, t)
+#                     elif fn == 'fifth':
+#                         val = self._fifth_fn(q_i, q_f, vel_i, vel_f, acc_i, acc_f, ts-1, t)
+#                 else:
+#                     val = q_i
+#                 
+#                 if self.type[i] == 'r':
+#                     thetas.append(val)
+#                     ds.append(self.dh_params[i][1])
+#                 elif self.type[i] == 'l':
+#                     ds.append(val)
+#                     thetas.append(self.dh_params[i][0])
+# 
+#             thetas_across_time.append(thetas)
+#             ds_across_time.append(ds)
+# 
+#         self._create_anim()
+#         anim_fn = partial(self._anim_fn, thetas_across_time=thetas_across_time, ds_across_time=ds_across_time, init_z=init_z)
+#         anim = FuncAnimation(self.fig, anim_fn, frames=ts, repeat=False)
+#         plt.show()

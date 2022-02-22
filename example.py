@@ -18,15 +18,6 @@ taus_req = [2207, 343]
 r = wall_e.Robot(name, type_, dh_params, masses, lengths, dimensions)
 print(r)
 
-# render the robot
-r.render()
- 
-# move the robot to the given position end position and render it
-r.move(end_pos=end_pos) # you can also provide the final_angles instead of end_pos
- 
-# plot the trajectory for moving the robot to the given end position
-r.move_traj(10, end_pos=end_pos) # you can also provide the final_angles instead of end_pos
-
 # forward kinematics
 fk_mat_expr, fk_mat = r.solve_fk()
 wall_e.pprint(fk_mat_expr); print();
