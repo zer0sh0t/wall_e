@@ -4,4 +4,10 @@
 
     pip install git+https://github.com/zer0sh0t/wall_e
 
+you can also view the robot, here is an example:
+
+![home_position](images/home_position.png)
+
+![end_position](images/end_position.png)
+
 to learn how to use the library, check out `example.py`
