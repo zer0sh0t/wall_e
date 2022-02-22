@@ -43,10 +43,10 @@ class Robot():
             acc = vel.diff(self.t)
             d, alpha, a = sp.symbols(f'd{i} alpha{i} a{i}', real=True)
         elif self.type[i] == 'l':
-            a = sp.Function(f'a{i}')(self.t)
-            vel = a.diff(self.t)
+            d = sp.Function(f'd{i}')(self.t)
+            vel = d.diff(self.t)
             acc = vel.diff(self.t)
-            theta, d, alpha = sp.symbols(f'theta{i} d{i} alpha{i}', real=True)
+            theta, alpha, a = sp.symbols(f'theta{i} alpha{i} a{i}', real=True)
 
         ct, st, ca, sa = sp.cos(theta), sp.sin(theta), sp.cos(alpha), sp.sin(alpha)
         screw_mat = sp.Matrix([
@@ -91,7 +91,7 @@ class Robot():
         fk_mat = self.solve_fk(dh_params)[1]
         qx, qy = float(fk_mat[0, 3]), float(fk_mat[1, 3])
         qx_req, qy_req, _ = end_pos
-        cost = ((qx_req - qx) ** 2 + (qy_req - qy) ** 2) ** 0.5 # don't optimize for z coordinate, just rotate the robot about z-axis to reach the given z-plane
+        cost = ((qx_req - qx) ** 2 + (qy_req - qy) ** 2) ** 0.5
         return cost
 
     # inverse kinematics
@@ -131,7 +131,7 @@ class Robot():
         if self.type[i] == 'r':
             q_idx = 0
         elif self.type[i] == 'l':
-            q_idx = 3
+            q_idx = 1
         return q_idx
 
     def _U_ij(self, i, j):
@@ -188,7 +188,7 @@ class Robot():
         return gravitational_force
     
     # inverse dynamics
-    def solve_id(self, thetas, vels, accs, lengths=None):
+    def solve_id(self, thetas, vels, accs, ds=None):
         '''
         source: https://www.youtube.com/playlist?list=PLbRMhDVUMngcdUbBySzyzcPiFTYWr4rV_ lecture 24 to 29
 
@@ -204,7 +204,7 @@ class Robot():
         if rectangular_joint: m: mass of the joint, l: length of the joint, b: breadth of the joint
         if cicular_joint: m: mass of the joint, r: radius of the joint
         T: transformation matrix
-        q: angle(if rotary) or length(if linear)
+        q: angle(if rotary) or offset(if linear)
         ii_r: position vector of ith frame wrt ith frame
         ii_v: velocity vector of ith frame wrt ith frame
         tau: torque(if rotary) or force(if linear)
@@ -239,8 +239,9 @@ class Robot():
         '''
         
         dh_params = copy.deepcopy(self.dh_params)
-        if lengths == None:
-            lengths = copy.deepcopy(self.lengths)
+        lengths = copy.deepcopy(self.lengths)
+        if ds == None:
+            ds = [dhp[1] for dhp in self.dh_params]
 
         if len(self.tau_exprs) == 0:
             Js = []
@@ -283,7 +284,7 @@ class Robot():
                 self.tau_exprs.append(tau_expr)
         
             '''
-            order of substitution: d, alpha, acc, vel, theta, a
+            order of substitution: a, alpha, acc, vel, theta, d
             values of higher order derivatives are substituted first and then the values of the lower ones,
             this is done to make sure that the lower order derivative values are not overwritten by the higher order ones
             to better understand this phenemenon, run this block of code:
@@ -300,31 +301,31 @@ class Robot():
             print(f'value obtained by substituting in this order: acc, val, theta: {value_1}')
             '''
 
-            d_alpha_dict = {} # wanted to keep a cache of this dict as it contains static values but sympy outputs unsolved expressions by using cached values, weird behavior
+            alpha_a_dict = {}
             for p, dhp in zip(self.forward_params, dh_params):
                 for i in range(len(p)):
                     if i == 0:
                         pass
-                    elif i == 3:
+                    elif i == 1:
                         pass
                     else:
-                        d_alpha_dict[p[i]] = dhp[i]
+                        alpha_a_dict[p[i]] = dhp[i]
 
             for i in range(len(self.tau_exprs)):
                 tau_expr = self.tau_exprs[i]
-                actual_tau_expr = tau_expr.subs(d_alpha_dict)
+                actual_tau_expr = tau_expr.subs(alpha_a_dict)
                 self.tau_exprs[i] = actual_tau_expr
 
         acc_dict = {}
         vel_dict = {}
         theta_dict = {}
-        a_dict = {}
-        for p, dhp, t in zip(self.forward_params, dh_params, thetas):
+        d_dict = {}
+        for p, t, ds in zip(self.forward_params, thetas, ds):
             for i in range(len(p)):
                 if i == 0:
                     theta_dict[p[i]] = t
-                elif i == 3:
-                    a_dict[p[i]] = dhp[i]
+                elif i == 1:
+                    d_dict[p[i]] = dhp[i]
                 else:
                     pass
         for vp, v in zip(self.vel_params, vels):
@@ -334,33 +335,33 @@ class Robot():
 
         taus = []
         for tau_expr in self.tau_exprs:
-            tau = tau_expr.subs(acc_dict).subs(vel_dict).subs(theta_dict).subs(a_dict)
+            tau = tau_expr.subs(acc_dict).subs(vel_dict).subs(theta_dict).subs(d_dict)
             taus.append(tau)
         return self.tau_exprs, taus
 
     def _get_vals(self, list_):
         n = len(self.dh_params)
-        thetas, lengths, vels, accs = [], [], [], []
+        thetas, ds, vels, accs = [], [], [], []
         j = 0
         for i in range(len(list_)):
             val = list_[i]
             if 0 <= i < n:
                 if self.type[j] == 'r':
                     thetas.append(val) # this value will be optimized
-                    lengths.append(self.lengths[j]) # whereas this value won't be optimized as this joint can't change it's length
+                    ds.append(self.dh_params[j][1]) # whereas this value won't be optimized as this joint can't change it's length ##################
                 elif self.type[j] == 'l':
-                    lengths.append(val) # this value will be optimized
+                    ds.append(val) # this value will be optimized
                     thetas.append(self.dh_params[j][0]) # whereas this value won't be optimized as this joint can't change its angle
                 j += 1
             elif n <= i < 2*n:
                 vels.append(val)
             else:
                 accs.append(val)
-        return thetas, lengths, vels, accs
+        return thetas, ds, vels, accs
 
     def _cost_fn_fd(self, initial_guess, taus_req):
-        thetas, lengths, vels, accs = self._get_vals(initial_guess)
-        taus = self.solve_id(thetas, vels, accs, lengths)[1]
+        thetas, ds, vels, accs = self._get_vals(initial_guess)
+        taus = self.solve_id(thetas, vels, accs, ds)[1]
         cost = 0
         for tr, t in zip(taus_req, taus):
             cost += (tr - t) ** 2
@@ -376,22 +377,26 @@ class Robot():
 
         result = minimize(cost_fn, initial_guess, tol=tol)
         optim_vals = result.x
-        thetas, lengths, vels, accs = self._get_vals(optim_vals)
-        taus = self.solve_id(thetas, vels, accs, lengths)[1]
-        optim_vals = {'thetas': thetas, 'lengths': lengths, 'vels': vels, 'accs': accs}
+        thetas, ds, vels, accs = self._get_vals(optim_vals)
+        taus = self.solve_id(thetas, vels, accs, ds)[1]
+        optim_vals = {'thetas': thetas, 'offsets(d)': ds, 'vels': vels, 'accs': accs}
         return optim_vals, taus
         
-    def _get_pts(self, s_pt, length, angle, e_z):
+    def _get_pts(self, s_pt, length, angle, d, init_z=0):
         x, y, z = s_pt
         end_x = x + length * math.cos(angle)
         end_y = y + length * math.sin(angle)
-        return (end_x, end_y, e_z)
+        end_z = z + d + init_z
+        offset_pts = (end_x, end_y, z + init_z)
+        end_pts = (end_x, end_y, end_z)
+        return offset_pts, end_pts
 
-    def _render(self, angles, lengths, e_z, reinit):
+    def _render(self, angles, ds, init_z, reinit):
         if angles == None:
             angles = [dhp[0] for dhp in self.dh_params]
-        if lengths == None:
-            lengths = copy.deepcopy(self.lengths)
+        if ds == None:
+            ds = [dhp[1] for dhp in self.dh_params]
+        lengths = copy.deepcopy(self.lengths)
         
         if reinit:
             fig = plt.figure()
@@ -406,25 +411,29 @@ class Robot():
         for i in range(len(angles)):
             if i != 0:
                 angle = angles[i] + angles[i-1]
-                z = e_z
+                iz = 0
                 c = 'r'
             else:
                 angle = angles[i]
-                z = 0
+                iz = init_z
                 c = 'm' # base
             
-            e_pt = self._get_pts(s_pt, lengths[i], angle, e_z)
-            ax.scatter(z, s_pt[1], zs=s_pt[0], c=c)
-            ax.plot([s_pt[2], e_pt[2]], [s_pt[1], e_pt[1]], zs=[s_pt[0], e_pt[0]], c='b')
+            o_pt, e_pt = self._get_pts(s_pt, lengths[i], angle, ds[i], iz)
+            ax.scatter(s_pt[2], s_pt[1], zs=s_pt[0], c=c) # current point
+            ax.scatter(o_pt[2], o_pt[1], zs=o_pt[0], c='r') # offset point
+
+            # s_pt -> o_pt -> e_pt
+            ax.plot([s_pt[2], o_pt[2]], [s_pt[1], o_pt[1]], zs=[s_pt[0], o_pt[0]], c='b')
+            ax.plot([o_pt[2], e_pt[2]], [o_pt[1], e_pt[1]], zs=[o_pt[0], e_pt[0]], c='b')
             s_pt = e_pt
-        ax.scatter(z, s_pt[1], zs=s_pt[0], c='g') # end effector
+        ax.scatter(s_pt[2], s_pt[1], zs=s_pt[0], c='g') # end effector
 
     # render the robot at home position provided in the dh paramters
-    def render(self, angles=None, lengths=None, e_z=0):
-        self._render(angles, lengths, e_z, True)
+    def render(self, angles=None, ds=None, init_z=0):
+        self._render(angles, ds, init_z, True)
         plt.show()
 
-    def move(self, end_pos=None, thetas=None, lengths=None):
+    def move(self, end_pos=None, thetas=None, ds=None, ret=False):
         '''
         moves the robot to the given position/angle
         provide either end_pos or thetas
@@ -432,7 +441,7 @@ class Robot():
         end_pos(tuple): (x_final, y_final, z_final)
         thetas(list): [theta_0, theta_1, ...]
         optional:
-        lengths(list): [len_0, len_1, ...]
+        ds(list): [d_0, d_1, ...]
         '''
         if len(self.forward_mats) == 0:
             _, _ = self.solve_fk() # collect cache
@@ -443,7 +452,21 @@ class Robot():
             pass # we've got everything we need
         else:
             raise ValueError('please specify either the end position or the joint angles!!')
-        self.render(angles=thetas, lengths=lengths, e_z=end_pos[2])
+
+        if ds == None:
+            home_z = sum([dhp[1] for dhp in self.dh_params])
+        else:
+            home_z = sum(ds)
+
+        if end_pos[2] > home_z:
+            init_z = end_pos[2] - home_z
+        else:
+            init_z = - (abs(end_pos[2]) - home_z)
+
+        if ret:
+            return thetas, init_z
+        else:
+            self.render(angles=thetas, ds=ds, init_z=init_z)
 
     def _cubic_fn(self, q_i, q_f, ts, t):
         val = q_i + (3 * (q_f - q_i) / (ts**2)) * (t**2) - (2 * (q_f - q_i) / (ts**3)) * (t**3)
@@ -465,11 +488,10 @@ class Robot():
         self.fig = plt.figure()
         self.ax = self.fig.add_subplot(111, projection='3d')
 
-    def _anim_fn(self, i, thetas_across_time, lengths_across_time, end_z):
-        e_z = self._cubic_fn(0, end_z, len(thetas_across_time)-1, i)
-        self._render(angles=thetas_across_time[i], lengths=lengths_across_time[i], e_z=e_z, reinit=False) 
+    def _anim_fn(self, i, thetas_across_time, ds_across_time, init_z):
+        self._render(angles=thetas_across_time[i], ds=ds_across_time[i], init_z=init_z, reinit=False) 
 
-    def move_traj(self, ts, end_pos=None, final_angles=None, final_lengths=None, fn='cubic', final_vels=None, final_accs=None):
+    def move_traj(self, ts, end_pos=None, final_angles=None, final_ds=None, fn='cubic', final_vels=None, final_accs=None):
         '''
         plots the trajectory of the robot
         provide either end_pos or final_angles
@@ -484,7 +506,7 @@ class Robot():
         'fifth' - use this if final_vels != None and final_accs != None
 
         optional:
-        final_lengths(list): [len_0, len_1, ...] # for linear joints
+        final_ds(list): [d_0, d_1, ...] # for linear joints
         final_vels(list): [vel_0, vel_1, ...]
         final_accs(list): [acc_0, acc_1, ...]
         '''
@@ -492,15 +514,9 @@ class Robot():
             raise ValueError('please input a valid trajectory function!!')
 
         init_angles = [dhp[0] for dhp in self.dh_params]
-        init_lengths = copy.deepcopy(self.lengths)
+        init_ds = [dhp[1] for dhp in self.dh_params]
         if end_pos != None:
-            if len(self.forward_mats) == 0:
-                _, _ = self.solve_fk() # collect cache
-            final_angles, _ = self.solve_ik(end_pos)
-        elif final_angles != None:
-            pass # we've got everything we need
-        else:
-            raise ValueError('please specify either the end position or the final joint angles!!')
+            final_angles, init_z = self.move(end_pos, ret=True)
         
         if fn != 'cubic':
             vel_i = 0
@@ -508,18 +524,18 @@ class Robot():
             acc_i = 0
         
         thetas_across_time = []
-        lengths_across_time = []
+        ds_across_time = []
         for t in range(ts):
             thetas = []
-            lengths = []
+            ds = []
 
             for i in range(len(self.dh_params)):
                 if self.type[i] == 'r':
                     q_i, q_f = init_angles[i], final_angles[i]
                 elif self.type[i] == 'l':
-                    q_i = init_lengths[i]
-                    if final_lengths != None:
-                        q_f = final_lengths[i]
+                    q_i = init_ds[i]
+                    if final_ds != None:
+                        q_f = final_ds[i]
                     else:
                         q_f = q_i
 
@@ -528,7 +544,7 @@ class Robot():
                 if fn == 'fifth':
                     acc_f = final_accs[i]
 
-                if q_f != q_i: # happens only when the linear joint's length is not changed across time
+                if q_f != q_i: # happens only when the linear joint's offset is not changed across time
                     if fn == 'cubic':
                         val = self._cubic_fn(q_i, q_f, ts-1, t)
                     elif fn == 'cubic_dot':
@@ -540,16 +556,16 @@ class Robot():
                 
                 if self.type[i] == 'r':
                     thetas.append(val)
-                    lengths.append(self.lengths[i])
+                    ds.append(self.dh_params[i][1])
                 elif self.type[i] == 'l':
-                    lengths.append(val)
+                    ds.append(val)
                     thetas.append(self.dh_params[i][0])
 
             thetas_across_time.append(thetas)
-            lengths_across_time.append(lengths)
+            ds_across_time.append(ds)
 
         self._create_anim()
-        anim_fn = partial(self._anim_fn, thetas_across_time=thetas_across_time, lengths_across_time=lengths_across_time, end_z=end_pos[2])
+        anim_fn = partial(self._anim_fn, thetas_across_time=thetas_across_time, ds_across_time=ds_across_time, init_z=init_z)
         anim = FuncAnimation(self.fig, anim_fn, frames=ts, repeat=False)
         plt.show()
 
