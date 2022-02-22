@@ -489,7 +489,8 @@ class Robot():
         self.ax = self.fig.add_subplot(111, projection='3d')
 
     def _anim_fn(self, i, thetas_across_time, ds_across_time, init_z):
-        self._render(angles=thetas_across_time[i], ds=ds_across_time[i], init_z=init_z, reinit=False) 
+        z = self._cubic_fn(0, init_z, len(thetas_across_time)-1, i) # smooth translation towards the end z plane
+        self._render(angles=thetas_across_time[i], ds=ds_across_time[i], init_z=z, reinit=False) 
 
     def move_traj(self, ts, end_pos=None, final_angles=None, final_ds=None, fn='cubic', final_vels=None, final_accs=None):
         '''
