@@ -458,10 +458,11 @@ class Robot():
         else:
             home_z = sum(ds)
 
-        if end_pos[2] > home_z:
-            init_z = end_pos[2] - home_z
-        else:
-            init_z = - (abs(end_pos[2]) - home_z)
+        # if end_pos[2] > home_z:
+        #     init_z = end_pos[2] - home_z
+        # else:
+        #     init_z = - (abs(end_pos[2]) - home_z)
+        init_z = end_pos[2] - home_z
 
         if ret:
             return thetas, init_z
