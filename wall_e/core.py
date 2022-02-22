@@ -125,7 +125,6 @@ class Robot():
             
             qz_req = end_pos[2]
             fk_mat = self.solve_fk(dh_params)[1]
-            fk_mat[2, 3] = qz_req # just rotate the robot about z-axis to reach the given z-plane
             return final_theta_vals, fk_mat
 
     def _get_q_idx(self, i):
